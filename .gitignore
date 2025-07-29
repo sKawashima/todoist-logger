@@ -1,0 +1,15 @@
+node_modules/
+.env
+.DS_Store
+dist/
+*.log
+
+# Obsidian
+data.json
+
+# Build files (keep main.js for releases)
+# main.js is needed for the plugin to work
+
+# Development
+.idea/
+.vscode/
