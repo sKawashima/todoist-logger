@@ -1,7 +1,7 @@
 {
   "id": "todoist-logger",
   "name": "Todoist Logger",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "minAppVersion": "0.15.0",
   "description": "Import completed tasks from Todoist as markdown lists",
   "author": "Your Name",
