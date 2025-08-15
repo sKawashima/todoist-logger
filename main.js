@@ -33,7 +33,9 @@ var DEFAULT_SETTINGS = {
   includeProject: true,
   includeTime: false,
   headingLevel: 2,
-  lastSelectedDate: ""
+  lastSelectedDate: "",
+  weekStart: 0
+  // Default to Sunday
 };
 var TodoistLogger = class extends import_obsidian.Plugin {
   async onload() {
@@ -44,6 +46,24 @@ var TodoistLogger = class extends import_obsidian.Plugin {
       callback: () => {
         new DatePickerModal(this.app, this, async (date) => {
           await this.insertCompletedTasks(date);
+        }).open();
+      }
+    });
+    this.addCommand({
+      id: "insert-completed-tasks-weekly",
+      name: "Insert completed tasks (weekly)",
+      callback: () => {
+        new WeekPickerModal(this.app, this, async (startDate) => {
+          await this.insertCompletedTasksWeekly(startDate);
+        }).open();
+      }
+    });
+    this.addCommand({
+      id: "insert-completed-tasks-monthly",
+      name: "Insert completed tasks (monthly)",
+      callback: () => {
+        new MonthPickerModal(this.app, this, async (date) => {
+          await this.insertCompletedTasksMonthly(date);
         }).open();
       }
     });
@@ -81,6 +101,76 @@ var TodoistLogger = class extends import_obsidian.Plugin {
       new import_obsidian.Notice(`Error: ${error.message}`);
     }
   }
+  async insertCompletedTasksWeekly(date) {
+    var _a, _b;
+    if (!this.settings.apiToken) {
+      new import_obsidian.Notice("Please set your Todoist API token in the plugin settings");
+      return;
+    }
+    try {
+      new import_obsidian.Notice("Fetching completed tasks for the week...");
+      const weekRange = this.getWeekRange(date);
+      const { since, until } = weekRange;
+      const url = `https://api.todoist.com/sync/v9/completed/get_all?since=${since}&until=${until}`;
+      const response = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${this.settings.apiToken}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} - ${response.statusText}`);
+      }
+      const completedData = await response.json();
+      const markdown = this.formatWeeklyTasksAsMarkdown(completedData, weekRange);
+      const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView)) == null ? void 0 : _a.editor;
+      if (editor) {
+        editor.replaceSelection(markdown);
+        new import_obsidian.Notice(`Inserted ${((_b = completedData.items) == null ? void 0 : _b.length) || 0} completed tasks for the week`);
+      } else {
+        new import_obsidian.Notice("No active editor found");
+      }
+      this.settings.lastSelectedDate = date.toISOString();
+      await this.saveSettings();
+    } catch (error) {
+      console.error("Error fetching weekly tasks:", error);
+      new import_obsidian.Notice(`Error: ${error.message}`);
+    }
+  }
+  async insertCompletedTasksMonthly(date) {
+    var _a, _b;
+    if (!this.settings.apiToken) {
+      new import_obsidian.Notice("Please set your Todoist API token in the plugin settings");
+      return;
+    }
+    try {
+      new import_obsidian.Notice("Fetching completed tasks for the month...");
+      const monthRange = this.getMonthRange(date);
+      const { since, until } = monthRange;
+      const url = `https://api.todoist.com/sync/v9/completed/get_all?since=${since}&until=${until}`;
+      const response = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${this.settings.apiToken}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} - ${response.statusText}`);
+      }
+      const completedData = await response.json();
+      const markdown = this.formatMonthlyTasksAsMarkdown(completedData, monthRange);
+      const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView)) == null ? void 0 : _a.editor;
+      if (editor) {
+        editor.replaceSelection(markdown);
+        new import_obsidian.Notice(`Inserted ${((_b = completedData.items) == null ? void 0 : _b.length) || 0} completed tasks for the month`);
+      } else {
+        new import_obsidian.Notice("No active editor found");
+      }
+      this.settings.lastSelectedDate = date.toISOString();
+      await this.saveSettings();
+    } catch (error) {
+      console.error("Error fetching monthly tasks:", error);
+      new import_obsidian.Notice(`Error: ${error.message}`);
+    }
+  }
   async fetchCompletedTasks(date) {
     const { since, until } = this.getDateRange(date);
     const url = `https://api.todoist.com/sync/v9/completed/get_all?since=${since}&until=${until}`;
@@ -102,6 +192,34 @@ var TodoistLogger = class extends import_obsidian.Plugin {
     return {
       since: startOfDay.toISOString(),
       until: endOfDay.toISOString()
+    };
+  }
+  getWeekRange(date) {
+    const startOfWeek = new Date(date);
+    const dayOfWeek = startOfWeek.getDay();
+    const diff = dayOfWeek >= this.settings.weekStart ? dayOfWeek - this.settings.weekStart : 7 - this.settings.weekStart + dayOfWeek;
+    startOfWeek.setDate(startOfWeek.getDate() - diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(endOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+    return {
+      since: startOfWeek.toISOString(),
+      until: endOfWeek.toISOString(),
+      startDate: new Date(startOfWeek),
+      endDate: new Date(endOfWeek)
+    };
+  }
+  getMonthRange(date) {
+    const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+    return {
+      since: startOfMonth.toISOString(),
+      until: endOfMonth.toISOString(),
+      startDate: new Date(startOfMonth),
+      endDate: new Date(endOfMonth)
     };
   }
   formatTasksAsMarkdown(data, date) {
@@ -126,6 +244,114 @@ var TodoistLogger = class extends import_obsidian.Plugin {
       }
       lines.push(line);
     });
+    return lines.join("\n") + "\n";
+  }
+  formatWeeklyTasksAsMarkdown(data, weekRange) {
+    const { items = [], projects = {} } = data;
+    const { startDate, endDate } = weekRange;
+    const lines = [];
+    const weekStartStr = startDate.toLocaleDateString("ja-JP");
+    const weekEndStr = endDate.toLocaleDateString("ja-JP");
+    lines.push(`${"#".repeat(this.settings.headingLevel)} ${weekStartStr} - ${weekEndStr} \u9031\u9593\u5B8C\u4E86\u30BF\u30B9\u30AF
+`);
+    if (items.length === 0) {
+      lines.push("\u3053\u306E\u9031\u306B\u5B8C\u4E86\u3057\u305F\u30BF\u30B9\u30AF\u306F\u3042\u308A\u307E\u305B\u3093\u3002\n");
+      return lines.join("\n");
+    }
+    const tasksByDate = {};
+    items.forEach((item) => {
+      const completedDate = new Date(item.completed_at);
+      const dateKey = completedDate.toLocaleDateString("ja-JP");
+      if (!tasksByDate[dateKey]) {
+        tasksByDate[dateKey] = [];
+      }
+      tasksByDate[dateKey].push(item);
+    });
+    const sortedDates = Object.keys(tasksByDate).sort((a, b) => {
+      return new Date(a).getTime() - new Date(b).getTime();
+    });
+    sortedDates.forEach((dateStr) => {
+      lines.push(`
+${"#".repeat(this.settings.headingLevel + 1)} ${dateStr}`);
+      tasksByDate[dateStr].forEach((item) => {
+        let line = `- ${item.content}`;
+        if (this.settings.includeProject && item.project_id && projects[item.project_id]) {
+          line += ` [${projects[item.project_id].name}]`;
+        }
+        if (this.settings.includeTime) {
+          const completedTime = new Date(item.completed_at);
+          line += ` (${completedTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })})`;
+        }
+        lines.push(line);
+      });
+    });
+    return lines.join("\n") + "\n";
+  }
+  formatMonthlyTasksAsMarkdown(data, monthRange) {
+    const { items = [], projects = {} } = data;
+    const { startDate, endDate } = monthRange;
+    const lines = [];
+    const year = startDate.getFullYear();
+    const month = startDate.getMonth() + 1;
+    lines.push(`${"#".repeat(this.settings.headingLevel)} ${year}\u5E74${month}\u6708 \u5B8C\u4E86\u30BF\u30B9\u30AF
+`);
+    if (items.length === 0) {
+      lines.push("\u3053\u306E\u6708\u306B\u5B8C\u4E86\u3057\u305F\u30BF\u30B9\u30AF\u306F\u3042\u308A\u307E\u305B\u3093\u3002\n");
+      return lines.join("\n");
+    }
+    const tasksByWeek = {};
+    items.forEach((item) => {
+      const completedDate = new Date(item.completed_at);
+      const weekRange = this.getWeekRange(completedDate);
+      const weekKey = `${weekRange.startDate.toISOString().split("T")[0]}_${weekRange.endDate.toISOString().split("T")[0]}`;
+      if (!tasksByWeek[weekKey]) {
+        tasksByWeek[weekKey] = {
+          weekStart: weekRange.startDate,
+          weekEnd: weekRange.endDate,
+          tasks: []
+        };
+      }
+      tasksByWeek[weekKey].tasks.push(item);
+    });
+    const sortedWeeks = Object.keys(tasksByWeek).sort((a, b) => {
+      return tasksByWeek[a].weekStart.getTime() - tasksByWeek[b].weekStart.getTime();
+    });
+    sortedWeeks.forEach((weekKey, index) => {
+      const week = tasksByWeek[weekKey];
+      const weekNum = index + 1;
+      lines.push(`
+${"#".repeat(this.settings.headingLevel + 1)} \u7B2C${weekNum}\u9031 (${week.weekStart.toLocaleDateString("ja-JP")} - ${week.weekEnd.toLocaleDateString("ja-JP")})`);
+      const tasksByDate = {};
+      week.tasks.forEach((task) => {
+        const completedDate = new Date(task.completed_at);
+        const dateKey = completedDate.toLocaleDateString("ja-JP");
+        if (!tasksByDate[dateKey]) {
+          tasksByDate[dateKey] = [];
+        }
+        tasksByDate[dateKey].push(task);
+      });
+      const sortedDates = Object.keys(tasksByDate).sort((a, b) => {
+        return new Date(a).getTime() - new Date(b).getTime();
+      });
+      sortedDates.forEach((dateStr) => {
+        lines.push(`
+${"#".repeat(this.settings.headingLevel + 2)} ${dateStr}`);
+        tasksByDate[dateStr].forEach((item) => {
+          let line = `- ${item.content}`;
+          if (this.settings.includeProject && item.project_id && projects[item.project_id]) {
+            line += ` [${projects[item.project_id].name}]`;
+          }
+          if (this.settings.includeTime) {
+            const completedTime = new Date(item.completed_at);
+            line += ` (${completedTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })})`;
+          }
+          lines.push(line);
+        });
+      });
+    });
+    lines.push(`
+
+**\u5408\u8A08\u30BF\u30B9\u30AF\u6570**: ${items.length}`);
     return lines.join("\n") + "\n";
   }
 };
@@ -171,6 +397,106 @@ var DatePickerModal = class extends import_obsidian.Modal {
     contentEl.empty();
   }
 };
+var WeekPickerModal = class extends import_obsidian.Modal {
+  constructor(app, plugin, onSubmit) {
+    super(app);
+    this.plugin = plugin;
+    this.onSubmit = onSubmit;
+    if (this.plugin.settings.lastSelectedDate) {
+      this.selectedDate = new Date(this.plugin.settings.lastSelectedDate);
+    } else {
+      this.selectedDate = new Date();
+    }
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Select Week" });
+    const weekRange = this.plugin.getWeekRange(this.selectedDate);
+    const weekInfo = contentEl.createEl("p", {
+      text: `\u9031: ${weekRange.startDate.toLocaleDateString("ja-JP")} - ${weekRange.endDate.toLocaleDateString("ja-JP")}`
+    });
+    new import_obsidian.Setting(contentEl).setName("Week").setDesc("Select any date within the desired week").addText((text) => {
+      const dateStr = this.selectedDate.toISOString().split("T")[0];
+      text.setValue(dateStr);
+      text.inputEl.type = "date";
+      text.onChange((value) => {
+        this.selectedDate = new Date(value + "T00:00:00");
+        const newWeekRange = this.plugin.getWeekRange(this.selectedDate);
+        weekInfo.setText(`\u9031: ${newWeekRange.startDate.toLocaleDateString("ja-JP")} - ${newWeekRange.endDate.toLocaleDateString("ja-JP")}`);
+      });
+    });
+    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("This Week").onClick(() => {
+      this.selectedDate = new Date();
+      this.close();
+      this.onSubmit(this.selectedDate);
+    })).addButton((btn) => btn.setButtonText("Last Week").onClick(() => {
+      const lastWeek = new Date();
+      lastWeek.setDate(lastWeek.getDate() - 7);
+      this.selectedDate = lastWeek;
+      this.close();
+      this.onSubmit(this.selectedDate);
+    })).addButton((btn) => btn.setButtonText("Insert").setCta().onClick(() => {
+      this.close();
+      this.onSubmit(this.selectedDate);
+    }));
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
+var MonthPickerModal = class extends import_obsidian.Modal {
+  constructor(app, plugin, onSubmit) {
+    super(app);
+    this.plugin = plugin;
+    this.onSubmit = onSubmit;
+    if (this.plugin.settings.lastSelectedDate) {
+      this.selectedDate = new Date(this.plugin.settings.lastSelectedDate);
+    } else {
+      this.selectedDate = new Date();
+    }
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Select Month" });
+    const monthRange = this.plugin.getMonthRange(this.selectedDate);
+    const monthInfo = contentEl.createEl("p", {
+      text: `${this.selectedDate.getFullYear()}\u5E74${this.selectedDate.getMonth() + 1}\u6708`
+    });
+    new import_obsidian.Setting(contentEl).setName("Month").setDesc("Select any date within the desired month").addText((text) => {
+      const year = this.selectedDate.getFullYear();
+      const month = String(this.selectedDate.getMonth() + 1).padStart(2, "0");
+      const monthStr = `${year}-${month}`;
+      text.setValue(monthStr);
+      text.inputEl.type = "month";
+      text.onChange((value) => {
+        if (value) {
+          const [year2, month2] = value.split("-");
+          this.selectedDate = new Date(parseInt(year2), parseInt(month2) - 1, 1);
+          monthInfo.setText(`${this.selectedDate.getFullYear()}\u5E74${this.selectedDate.getMonth() + 1}\u6708`);
+        }
+      });
+    });
+    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("This Month").onClick(() => {
+      this.selectedDate = new Date();
+      this.close();
+      this.onSubmit(this.selectedDate);
+    })).addButton((btn) => btn.setButtonText("Last Month").onClick(() => {
+      const lastMonth = new Date();
+      lastMonth.setMonth(lastMonth.getMonth() - 1);
+      this.selectedDate = lastMonth;
+      this.close();
+      this.onSubmit(this.selectedDate);
+    })).addButton((btn) => btn.setButtonText("Insert").setCta().onClick(() => {
+      this.close();
+      this.onSubmit(this.selectedDate);
+    }));
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
 var TodoistLoggerSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -194,6 +520,10 @@ var TodoistLoggerSettingTab = class extends import_obsidian.PluginSettingTab {
     }));
     new import_obsidian.Setting(containerEl).setName("Heading level").setDesc("Heading level for the date title (1-6)").addSlider((slider) => slider.setLimits(1, 6, 1).setValue(this.plugin.settings.headingLevel).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.headingLevel = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Week start day").setDesc("First day of the week for weekly view").addDropdown((dropdown) => dropdown.addOption("0", "Sunday").addOption("1", "Monday").setValue(this.plugin.settings.weekStart.toString()).onChange(async (value) => {
+      this.plugin.settings.weekStart = parseInt(value);
       await this.plugin.saveSettings();
     }));
   }
